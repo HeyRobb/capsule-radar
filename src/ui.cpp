@@ -844,6 +844,16 @@ void ui_on_data_updated(void) {
     refresh_active_tile();   // only the visible tile pays the rebuild cost
 }
 
+// Same effect as tapping that aircraft on the scope (select + detail card, which also starts
+// the route and photo lookups); used by main.cpp to put a newly arrived plane on the card.
+// While the idle clock is up the card stays hidden, and clock_stage_cb() shows it when the
+// clock goes away. False when the aircraft is not on the scope (filtered, over the draw cap...).
+bool ui_select_aircraft(const char *hex) {
+    if (!hex || !hex[0] || !radar::selectHex(hex)) return false;
+    refresh_card();
+    return true;
+}
+
 // ------------------------------------------------------------------- building
 static lv_obj_t *make_tile_title(lv_obj_t *tile, const char *txt) {
     lv_obj_t *l = lv_label_create(tile);

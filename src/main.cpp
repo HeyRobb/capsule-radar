@@ -71,6 +71,9 @@ static bool                  g_alertSched = false;                   // only sou
 static int                   g_alertStartMin = ALERT_SCHED_START_DEFAULT_MIN;  // window start, minutes since local midnight (web/NVS)
 static int                   g_alertStopMin  = ALERT_SCHED_STOP_DEFAULT_MIN;   // window stop (not included); before start = crosses midnight
 static bool                  g_wakeRequest = false;                  // a new plane entered the scope: wake the screen on this loop pass (core 1 only)
+static std::string           g_wakeHex;                              // ...and put this plane on the detail card (the one chosen from this poll's new planes)
+static bool                  g_wakeHexUrgent = false;                // g_wakeHex is an emergency / military plane: an ordinary one never displaces it
+static double                g_wakeHexKm = 0.0;                      // its distance from home: of equals, the closer plane is the one selected
 static uint32_t              g_idleDimMs = IDLE_DIM_MS;              // dim after this idle time (0 = never)
 static bool                  g_fdSleep = true;                       // face-down sleep (screen off) on/off (web/NVS)
 static bool                  g_clockOn = true;                       // idle clock instead of the idle dim (web/NVS)
@@ -348,7 +351,8 @@ static bool alertsAllowedNow() {
 // Audio alerts + the new-plane screen wake. g_alertMode: 0 = off, 1 = emergencies only,
 // 2 = new aircraft + emergencies. An aircraft entering the display range (the edge of the
 // scope) is "new": the alert mode decides whether that pings AND wakes the screen as if it
-// were touched (g_wakeRequest) -- the same event, so Mute (sound only) leaves the wake alone.
+// were touched (g_wakeRequest) -- the same event, so Mute (sound only) leaves the wake alone --
+// and the new plane is put on the detail card (g_wakeHex; loop() selects it).
 // g_proximityKm > 0 also pings (once) when any aircraft crosses into that inner radius; that
 // beep does not wake the screen (the plane already did when it entered the scope).
 // The schedule (g_alertSched) decides whether a ping SOUNDS and whether the screen WAKES:
@@ -389,6 +393,14 @@ static void checkAudioEvents() {
             }
             if (wake) {
                 g_wakeRequest = true;                                           // light the screen (applied in loop())
+                // which plane goes on the detail card: an emergency / military one beats an
+                // ordinary one; otherwise the closest of the planes that entered in this poll
+                if (g_wakeHex.empty() || (emergency && !g_wakeHexUrgent) ||
+                    (emergency == g_wakeHexUrgent && d < g_wakeHexKm)) {
+                    g_wakeHex = hex;
+                    g_wakeHexUrgent = emergency;
+                    g_wakeHexKm = d;
+                }
                 Serial.printf("[wake] %s entered range: screen wake\n", hex.c_str());
             }
         }
@@ -1582,10 +1594,17 @@ void loop() {
     // touched: the idle timer restarts from now, the clock / dim ends on this pass, and
     // the countdown to dim again begins. Not while face-down: that screen is dark on purpose,
     // and a "touch" would also end the face-down sleep (touchedSinceLastCheck reads the same
-    // inactivity timer).
+    // inactivity timer). The new plane is also put on the detail card, as if it had been tapped
+    // -- only when the radar is the view on screen (not mid-swipe, not the list / stats /
+    // weather), so a plane never pops up over another view; it replaces any card open now.
     if (g_wakeRequest) {
         g_wakeRequest = false;
-        if (!g_asleep) display::noteActivity();
+        if (!g_asleep) {
+            display::noteActivity();
+            if (!g_wakeHex.empty() && ui_sweep_visible()) ui_select_aircraft(g_wakeHex.c_str());
+        }
+        g_wakeHex.clear();
+        g_wakeHexUrgent = false;
     }
 
     // Idle: the clock, or the plain dim. Checked on every pass, so the touch that wakes the
