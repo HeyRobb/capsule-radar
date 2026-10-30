@@ -1,6 +1,7 @@
 In this fork I have added the following features:
 1. Added user-configurable schedule in WebGUI for disabling Alert tones (i.e., overnight while sleeping).
 2. Added a "Wake screen" from dim mode when a plane enters the specified radar range. Screen will not wake when plane enters range if in the scheduled "quiet time" window in the above feature.
+3. Auto-selects the most recent plane to enter the user-selected radar range and prioritizes military or emergency status aircraft.
 
 Tested and confirmed working on a WaveShare AMOLED 1.75" ESP32.
 
