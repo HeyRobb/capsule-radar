@@ -44,7 +44,8 @@ animation.
 
 ## Persistence & lifecycle
 - `Preferences` (NVS), namespace `capsuleradar`; keys read in `main.cpp`: `homeLat`, `homeLon`,
-  `rangeKm`, `bright`, `vol`, `mute`, `alertmode`, `proxkm`, `usegps`, `traillen`, `maxac`,
+  `rangeKm`, `bright`, `vol`, `mute`, `alertmode`, `proxkm`, `alsch` / `alstart` / `alstop`
+  (alert schedule: on/off and the window as minutes since local midnight), `usegps`, `traillen`, `maxac`,
   `idledim`, `fdsleep`, `clock`, `units`, `tz`, `bigtext`, `theme` (long-press or the web page),
   `sweep`, `airports`, `hideground`, `minalt`, `maxalt`, `milonly`, `lastview`, `rotDeg` (older
   installs: `rot`). The route cache has its own namespace, `routes` (`route_client.cpp`).
@@ -61,6 +62,7 @@ animation.
 - `adsb_client.h/.cpp` + `adsb_pacing.h` — HTTPS GET + streaming ArduinoJson parse for the three providers, with host-testable per-provider pacing.
 - `radar_view.h/.cpp` — scope rendering: rings, glyphs, trails, themes, detail-card data, the idle clock's scene and dial.
 - `clock_face.h` — the idle clock's animation model (host-tested).
+- `alert_schedule.h` — the alert schedule: HH:MM parsing of the web page's time inputs and the "only between these times" window check, including windows that cross midnight (host-tested).
 - `display.cpp` — panel bring-up and the per-pixel compositor (sweep, centre ripple, clock hands).
 - `ui.cpp` — LVGL views (radar/list/stats), detail card, HUD, zoom button, power-off button, clock touch catcher.
 - `main.cpp` — tasks, WiFi/portal, web config server, NVS settings, self-heal watchdog, idle clock / dim / brightness.

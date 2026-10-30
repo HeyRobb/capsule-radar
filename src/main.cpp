@@ -4,6 +4,7 @@
 #include <vector>
 #include "config.h"
 #include "web_input.h"              // strict parsing of numbers from the config page
+#include "alert_schedule.h"         // "only alert between these times" window check + HH:MM parsing
 #include "aircraft.h"
 #include "geo.h"
 #include "adsb_client.h"
@@ -66,6 +67,9 @@ static int                   g_volume = 60;                          // alert vo
 static bool                  g_muted  = false;                       // mute alert pings
 static int                   g_alertMode = 2;                        // 0=off 1=emergencies 2=new+emergencies (web/NVS)
 static float                 g_proximityKm = 0.0f;                   // proximity alert radius, km (0=off) (web/NVS)
+static bool                  g_alertSched = false;                   // only sound alerts between start and stop (web/NVS)
+static int                   g_alertStartMin = ALERT_SCHED_START_DEFAULT_MIN;  // window start, minutes since local midnight (web/NVS)
+static int                   g_alertStopMin  = ALERT_SCHED_STOP_DEFAULT_MIN;   // window stop (not included); before start = crosses midnight
 static uint32_t              g_idleDimMs = IDLE_DIM_MS;              // dim after this idle time (0 = never)
 static bool                  g_fdSleep = true;                       // face-down sleep (screen off) on/off (web/NVS)
 static bool                  g_clockOn = true;                       // idle clock instead of the idle dim (web/NVS)
@@ -309,6 +313,10 @@ static void loadSettings() {
     g_muted            = p.getBool("mute", false);
     g_alertMode        = p.getInt("alertmode", 2);
     g_proximityKm      = p.getFloat("proxkm", 0.0f);
+    g_alertSched       = p.getBool("alsch", false);
+    // a stored time that can't be a time of day (corrupt NVS) falls back to the default
+    g_alertStartMin    = repairClockMinutes(p.getInt("alstart", ALERT_SCHED_START_DEFAULT_MIN), ALERT_SCHED_START_DEFAULT_MIN);
+    g_alertStopMin     = repairClockMinutes(p.getInt("alstop",  ALERT_SCHED_STOP_DEFAULT_MIN),  ALERT_SCHED_STOP_DEFAULT_MIN);
     g_useGps           = p.getBool("usegps", false);
     g_trailLen         = p.getInt("traillen", 2);
     g_maxAc            = p.getInt("maxac", 20);
@@ -325,10 +333,24 @@ static void loadSettings() {
     radar::setLargeText(g_bigText);
 }
 
+// May an alert sound right now? Always, unless the schedule is on and the local time is
+// outside [start, stop). A clock that isn't set yet counts as allowed (alert_schedule.h).
+static bool alertsAllowedNow() {
+    if (!g_alertSched) return true;                       // off: skip reading the clock
+    struct tm ti;
+    const bool haveTime = getLocalTime(&ti, 0);
+    return alertScheduleAllows(g_alertSched, g_alertStartMin, g_alertStopMin, haveTime,
+                               haveTime ? ti.tm_hour * 60 + ti.tm_min : 0);
+}
+
 // Audio alerts. g_alertMode: 0 = off, 1 = emergencies only, 2 = new aircraft + emergencies.
 // g_proximityKm > 0 also pings (once) when any aircraft crosses into that radius.
+// The schedule (g_alertSched) only decides whether a ping SOUNDS: seen/seenProx keep
+// updating outside the window, so aircraft that showed up during quiet hours are already
+// known when it opens and don't all ping at once.
 static void checkAudioEvents() {
     if (!audio_present()) return;
+    const bool soundOk = alertsAllowedNow();
     static std::set<std::string> seen, seenProx;
     static bool first = true;
     static uint32_t lastNew = 0;
@@ -344,13 +366,13 @@ static void checkAudioEvents() {
         // proximity: fire once, when an aircraft first crosses into the radius (any aircraft)
         if (g_proximityKm > 0.0f && d <= g_proximityKm) {
             nowProx.insert(hex);
-            if (!first && !seenProx.count(hex)) audio_play(AUDIO_ALERT);
+            if (soundOk && !first && !seenProx.count(hex)) audio_play(AUDIO_ALERT);
         }
 
-        // new-in-range pings (on entry), gated by the alert mode
+        // new-in-range pings (on entry), gated by the alert mode and the schedule
         if (isNew) {
-            if (emergency) { if (g_alertMode >= 1) audio_play(AUDIO_ALERT); }   // emergencies only / +new
-            else if (g_alertMode >= 2 && millis() - lastNew > 3000) {
+            if (emergency) { if (soundOk && g_alertMode >= 1) audio_play(AUDIO_ALERT); }   // emergencies only / +new
+            else if (soundOk && g_alertMode >= 2 && millis() - lastNew > 3000) {
                 audio_play(AUDIO_NEW);                                          // new contact (rate-limited)
                 lastNew = millis();
             }
@@ -606,6 +628,16 @@ static void handleRoot() {
                  i, TZOPTS[i].offMin, TZOPTS[i].dst, g_tz == TZOPTS[i].tz ? " selected" : "", TZOPTS[i].label);
         tzopts += o;
     }
+    // alert schedule: the saved window as HH:MM for the <input type=time> fields, plus what
+    // the device's own clock says now (so a wrong time zone is easy to spot)
+    char schedStart[16], schedStop[16], schedNow[72];
+    snprintf(schedStart, sizeof(schedStart), "%02d:%02d", g_alertStartMin / 60, g_alertStartMin % 60);
+    snprintf(schedStop,  sizeof(schedStop),  "%02d:%02d", g_alertStopMin / 60,  g_alertStopMin % 60);
+    {
+        struct tm ti;
+        if (getLocalTime(&ti, 0)) snprintf(schedNow, sizeof(schedNow), "Device time now: %02d:%02d.", ti.tm_hour, ti.tm_min);
+        else snprintf(schedNow, sizeof(schedNow), "The clock isn&rsquo;t set yet, so alerts stay on until it is.");
+    }
     String gpsRow;   // only on the -G variant: offer to auto-set the centre from GPS
     if (gps_present()) {
         gpsRow  = "<label><input type=checkbox class=ck ";
@@ -648,6 +680,8 @@ static void handleRoot() {
         ".ck{width:auto;display:inline;margin-right:8px;vertical-align:middle}"
         ".sec{background:#0c1a12!important;color:#1dff86!important;border:1px solid #2a4a39!important}"
         "#map{height:220px;border-radius:10px;margin:6px 0 8px;border:1px solid #2a4a39;z-index:0}"
+        ".tr{display:flex;gap:10px}.tr>div{flex:1;min-width:0}"
+        ".hn{font-size:12px;opacity:.6;margin:6px 0 2px}"
         "</style></head><body>"
         "<div class=hd><div class=dot></div><div><h1>Capsule Radar</h1><p class=sub>Live ADS-B radar &middot; configuration</p></div></div>"
         "<div class=card><div class=t>Location &amp; range</div><form method=POST action=/save>"
@@ -684,6 +718,10 @@ static void handleRoot() {
         "<label><input type=checkbox class=ck %s onchange='m(this.checked)'>Mute alerts</label>"
         "<label>Alert on</label><select onchange='al(this.value)'>%s</select>"
         "<label>Proximity alert</label><select onchange='px(this.value)'>%s</select>"
+        "<label><input type=checkbox class=ck id=sch %s onchange='sc()'>Only alert between these times</label>"
+        "<div class=tr><div><label>Start</label><input type=time id=t1 value='%s' onchange='sc()'></div>"
+        "<div><label>Stop</label><input type=time id=t2 value='%s' onchange='sc()'></div></div>"
+        "<div class=hn>Local time (see Time zone above). Can cross midnight, e.g. 22:00 to 06:00. %s</div>"
         "<button type=button class=sec onclick='t()'>Test ping</button></div>"
         "<div class=card><div class=t>Network</div>"
         "<p style='color:#9affc8;font-size:13px;margin:0 0 4px'>Forget the saved WiFi and reopen the setup portal.</p>"
@@ -697,7 +735,7 @@ static void handleRoot() {
         "MK.on('dragend',function(){S(MK.getLatLng());});"
         "MAP.on('click',function(e){MK.setLatLng(e.latlng);S(e.latlng);});"
         "setTimeout(function(){MAP.invalidateSize();},300);"
-        "function G(p){fetch(p,{headers:{'" WEB_PAGE_HDR "':'1'}})}"
+        "function G(p){return fetch(p,{headers:{'" WEB_PAGE_HDR "':'1'}})}"
         "function b(v,s){G('/bright?v='+v+(s?'&save=1':''))}"
         "function v(x,s){G('/vol?v='+x+(s?'&save=1':''))}"
         "function m(c){G('/vol?mute='+(c?1:0)+'&save=1')}"
@@ -717,6 +755,12 @@ static void handleRoot() {
         "function u(v){G('/units?v='+v+'&save=1')}"
         "function al(v){G('/alerts?mode='+v+'&save=1')}"
         "function px(v){G('/alerts?prox='+v+'&save=1')}"
+        // schedule: a blank time (the user is mid-edit) is left out, so the device keeps the old one;
+        // a malformed one is answered 400, and the reload shows what the device actually kept
+        "function sc(){var q='sched='+(document.getElementById('sch').checked?1:0),"
+        "a=document.getElementById('t1').value,z=document.getElementById('t2').value;"
+        "if(a)q+='&start='+encodeURIComponent(a);if(z)q+='&stop='+encodeURIComponent(z);"
+        "G('/alerts?'+q+'&save=1').then(function(r){if(!r.ok)location.reload()})}"
         "function gp(c){G('/gps?v='+(c?1:0)+'&save=1')}"
         "function cl(c){G('/clock?v='+(c?1:0)+'&save=1')}"
         // auto-pick the visitor's time zone from their browser clock (only if they haven't set one)
@@ -733,6 +777,7 @@ static void handleRoot() {
         g_showAirports ? "checked" : "", g_hideGround ? "checked" : "", maopts.c_str(), mbopts.c_str(), g_milOnly ? "checked" : "",
         tlopts.c_str(), mxopts.c_str(), g_bigText ? "checked" : "", g_rotation, uopts.c_str(),
         g_volume, g_muted ? "checked" : "", aopts.c_str(), popts.c_str(),
+        g_alertSched ? "checked" : "", schedStart, schedStop, schedNow,
         g_settings.homeLat, g_settings.homeLon, (g_tz == TZ_STR ? 0 : 1));
     if (len >= (int)BUFSZ)   // truncated page = broken <script>; make it loud, not silent
         Serial.printf("[web] config page truncated: %d bytes > %u buffer\n", len, (unsigned)BUFSZ);
@@ -840,8 +885,21 @@ static void handleVol() {
     g_web.send(200, "text/plain", "ok");
 }
 
-static void handleAlerts() {   // what triggers the alert sound (live)
+static void handleAlerts() {   // what triggers the alert sound, and when (live)
     if (refuseUnlessPageFetch()) return;
+    // Schedule ("only between start and stop", local time). Validate before changing anything:
+    // a blank or malformed <input type=time> value answers 400 and leaves every setting as it was.
+    if (g_web.hasArg("sched") || g_web.hasArg("start") || g_web.hasArg("stop")) {
+        int startMin = g_alertStartMin, stopMin = g_alertStopMin;
+        if ((g_web.hasArg("start") && !parseClockMinutes(g_web.arg("start").c_str(), &startMin)) ||
+            (g_web.hasArg("stop")  && !parseClockMinutes(g_web.arg("stop").c_str(),  &stopMin))) {
+            g_web.send(400, "text/plain", "bad time (use HH:MM)");
+            return;
+        }
+        g_alertStartMin = startMin;
+        g_alertStopMin  = stopMin;
+        if (g_web.hasArg("sched")) g_alertSched = g_web.arg("sched").toInt() != 0;
+    }
     if (g_web.hasArg("mode")) g_alertMode   = constrain((int)g_web.arg("mode").toInt(), 0, 2);
     if (g_web.hasArg("prox")) {
         g_proximityKm = g_web.arg("prox").toFloat();   // km (0 = off)
@@ -853,6 +911,9 @@ static void handleAlerts() {   // what triggers the alert sound (live)
         p.begin("capsuleradar", false);
         p.putInt("alertmode", g_alertMode);
         p.putFloat("proxkm", g_proximityKm);
+        p.putBool("alsch", g_alertSched);
+        p.putInt("alstart", g_alertStartMin);
+        p.putInt("alstop", g_alertStopMin);
         p.end();
     }
     g_web.send(200, "text/plain", "ok");

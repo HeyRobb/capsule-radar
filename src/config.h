@@ -32,6 +32,12 @@ static const float WEB_RANGE_KM[]   = {10.0f, 15.0f, 25.0f, 30.0f, 50.0f, 100.0f
 #define MOTION_INTERP       1              // 1 = glyphs glide between polls; 0 = snap to new pos
 #define AC_STALE_MS         15000          // keep the last contacts through brief empty feed responses
 
+// ---------- Alert schedule ("only alert between these times", web page, Sound card) ----------
+// Minutes since local midnight (alert_schedule.h). The schedule is off until switched on;
+// these are the times the page shows the first time. 08:00-22:00 = quiet through the night.
+#define ALERT_SCHED_START_DEFAULT_MIN   (8 * 60)
+#define ALERT_SCHED_STOP_DEFAULT_MIN    (22 * 60)
+
 // ---------- Weather forecast (Open-Meteo, no API key) ----------
 #define WEATHER_REFRESH_MS  1800000UL      // 30 minutes; forecast data changes slowly
 #define WX_RADAR_REFRESH_MS 300000UL       // RainViewer frames update about every 5 minutes
