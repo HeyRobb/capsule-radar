@@ -1,3 +1,13 @@
+In this fork I have added the following features:
+1. Added user-configurable schedule in WebGUI for disabling Alert tones (i.e., overnight while sleeping).
+2. Added a 'wake screen from dim mode' timer reset when a plane enters the specified radar range. Screen will not wake when plane enters range     if in the scheduled "quiet time" window in the above feature.
+
+Tested and confirmed working on a WaveShare AMOLED 1.75" ESP32.
+To install (easiest method): Using the original developer's WebGUI at **[web flasher](https://socquique.github.io/capsule-radar/)** flash their Capsule-Radar firmware as instructed. Once running, download the release on here that matched your device model and unzip it, navigate to your existing Capsule-Radar's WebGUI, go to the very bottom and click on 'Firmware update' link. Click 'Choose file" and select the .bin file with '-ota' at the end of it. Then click "Update over WiFi" and your device will now be running this firmware. 
+
+
+
+
 # Capsule Radar 🛩️
 
 <p align="center">
