@@ -6,10 +6,10 @@ Tested and confirmed working on a WaveShare AMOLED 1.75" ESP32.
 
 To install:
 
--- If not running Capsule-Radar at all yet --
+-- If not running Capsule-Radar at all yet -- <br>
 Using the original developer's WebGUI here: **[web flasher](https://socquique.github.io/capsule-radar/)** flash their Capsule-Radar firmware as instructed. Once running Capsule-Radar, download the release on here that matches your device model and unzip it. Navigate to your existing Capsule-Radar's WebGUI, go to the very bottom and click on 'Firmware update' link. Click 'Choose file" and select the .bin file that you downloaded from here with '-ota' at the end of it . Then click "Update over WiFi" and your device will now be running this firmware. Enjoy!
 
--- If your are already running Capsule-Radar --
+-- If your are already running Capsule-Radar -- <br>
 Download the release on here that matches your device model and unzip it. Navigate to your existing Capsule-Radar's WebGUI, go to the very bottom and click on 'Firmware update' link. Click 'Choose file" and select the .bin file that you downloaded from here with '-ota' at the end of it . Then click "Update over WiFi" and your device will now be running this firmware. Enjoy!
 
 <p align="center"><img src="docs/img/Updated schedule screenshot.png" width="360" alt="Web settings: alert schedule and proximity alert"></p>
