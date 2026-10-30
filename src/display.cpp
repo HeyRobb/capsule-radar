@@ -913,6 +913,8 @@ uint16_t rotation() { return s_rot; }
 
 uint32_t inactiveMs() { return lv_disp_get_inactive_time(NULL); }
 
+void noteActivity() { lv_disp_trig_activity(NULL); }   // what a touch does to inactiveMs(), minus the touch
+
 } // namespace display
 
 #endif  // !BOARD_LCD21

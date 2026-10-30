@@ -349,6 +349,8 @@ float sweepAngleDeg() { return 0.0f; }   // never asked: sweepAvailable() is fal
 
 uint32_t inactiveMs() { return s_ready ? lv_disp_get_inactive_time(NULL) : 0; }
 
+void noteActivity() { if (s_ready) lv_disp_trig_activity(NULL); }   // what a touch does to inactiveMs(), minus the touch
+
 } // namespace display
 
 #endif  // BOARD_LCD21

@@ -40,7 +40,7 @@ animation.
 ## Input
 - Touch → screen coordinates → nearest-glyph hit test (within a tap radius) → select + populate detail card (HDG shows the aircraft's ground track).
 - Swipe gestures switch views; long-press cycles the visual theme; the on-screen zoom button cycles the range preset (10/20/30/50/100 km; the web page also offers 15, 25 and 150 km).
-- IMU posture from QMI8658 drives face-down sleep; touch inactivity drives the idle dim; LVGL indev for touch. While the screen is dark, a touch only wakes it and never reaches the UI.
+- IMU posture from QMI8658 drives face-down sleep; touch inactivity drives the idle dim (a plane crossing the proximity radius counts as activity too: `checkAudioEvents()` sets `g_wakeRequest`, the loop calls `display::noteActivity()` unless the screen is face-down); LVGL indev for touch. While the screen is dark, a touch only wakes it and never reaches the UI.
 
 ## Persistence & lifecycle
 - `Preferences` (NVS), namespace `capsuleradar`; keys read in `main.cpp`: `homeLat`, `homeLon`,

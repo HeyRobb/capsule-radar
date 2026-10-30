@@ -21,6 +21,12 @@ void setBrightness(uint8_t v);
 // ms since the last touch (LVGL inactivity timer) — for idle auto-dim.
 uint32_t inactiveMs();
 
+// Count as a touch for the idle timer, without one: inactiveMs() restarts from zero, so the
+// idle dim / clock ends and the countdown to dim again starts over. No UI event is sent (a
+// real touch can select a plane). main.cpp uses it to wake the screen when a plane crosses
+// the proximity radius. Call from the loop (core 1), like the rest of the LVGL calls.
+void noteActivity();
+
 // Rotate the whole UI clockwise by an arbitrary number of degrees (normalized to
 // 0..359), e.g. to compensate for any enclosure/mounting angle. Cardinal rotations
 // keep their optimized flush paths; other angles use a PSRAM framebuffer. Touch input
