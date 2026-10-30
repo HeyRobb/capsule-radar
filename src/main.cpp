@@ -70,7 +70,7 @@ static float                 g_proximityKm = 0.0f;                   // proximit
 static bool                  g_alertSched = false;                   // only sound alerts between start and stop (web/NVS)
 static int                   g_alertStartMin = ALERT_SCHED_START_DEFAULT_MIN;  // window start, minutes since local midnight (web/NVS)
 static int                   g_alertStopMin  = ALERT_SCHED_STOP_DEFAULT_MIN;   // window stop (not included); before start = crosses midnight
-static bool                  g_wakeRequest = false;                  // a plane crossed the proximity radius: wake the screen on this loop pass (core 1 only)
+static bool                  g_wakeRequest = false;                  // a new plane entered the scope: wake the screen on this loop pass (core 1 only)
 static uint32_t              g_idleDimMs = IDLE_DIM_MS;              // dim after this idle time (0 = never)
 static bool                  g_fdSleep = true;                       // face-down sleep (screen off) on/off (web/NVS)
 static bool                  g_clockOn = true;                       // idle clock instead of the idle dim (web/NVS)
@@ -334,7 +334,7 @@ static void loadSettings() {
     radar::setLargeText(g_bigText);
 }
 
-// May an alert sound (or the proximity wake light the screen) right now? Always, unless the
+// May an alert sound (or the new-plane wake light the screen) right now? Always, unless the
 // schedule is on and the local time is outside [start, stop). A clock that isn't set yet
 // counts as allowed (alert_schedule.h).
 static bool alertsAllowedNow() {
@@ -345,10 +345,12 @@ static bool alertsAllowedNow() {
                                haveTime ? ti.tm_hour * 60 + ti.tm_min : 0);
 }
 
-// Audio alerts + the proximity wake. g_alertMode: 0 = off, 1 = emergencies only,
-// 2 = new aircraft + emergencies. g_proximityKm > 0 also pings (once) when any aircraft
-// crosses into that radius, and asks the loop to wake the screen as if it were touched
-// (g_wakeRequest), whatever the alert mode and the mute setting.
+// Audio alerts + the new-plane screen wake. g_alertMode: 0 = off, 1 = emergencies only,
+// 2 = new aircraft + emergencies. An aircraft entering the display range (the edge of the
+// scope) is "new": the alert mode decides whether that pings AND wakes the screen as if it
+// were touched (g_wakeRequest) -- the same event, so Mute (sound only) leaves the wake alone.
+// g_proximityKm > 0 also pings (once) when any aircraft crosses into that inner radius; that
+// beep does not wake the screen (the plane already did when it entered the scope).
 // The schedule (g_alertSched) decides whether a ping SOUNDS and whether the screen WAKES:
 // seen/seenProx keep updating outside the window, so aircraft that showed up during quiet
 // hours are already known when it opens and don't all ping or wake at once.
@@ -370,19 +372,24 @@ static void checkAudioEvents() {
         // proximity: fire once, when an aircraft first crosses into the radius (any aircraft)
         if (g_proximityKm > 0.0f && d <= g_proximityKm) {
             nowProx.insert(hex);
-            if (schedOk && !first && !seenProx.count(hex)) {
-                audio_play(AUDIO_ALERT);
-                g_wakeRequest = true;                          // light the screen (applied in loop())
-                Serial.printf("[wake] %s inside %.1f km: screen wake\n", hex.c_str(), g_proximityKm);
-            }
+            if (schedOk && !first && !seenProx.count(hex)) audio_play(AUDIO_ALERT);
         }
 
-        // new-in-range pings (on entry), gated by the alert mode and the schedule
-        if (isNew) {
-            if (emergency) { if (schedOk && g_alertMode >= 1) audio_play(AUDIO_ALERT); }   // emergencies only / +new
-            else if (schedOk && g_alertMode >= 2 && millis() - lastNew > 3000) {
-                audio_play(AUDIO_NEW);                                          // new contact (rate-limited)
-                lastNew = millis();
+        // new-in-range (on entry): ping + screen wake, gated by the alert mode and the schedule
+        if (isNew && schedOk) {
+            bool wake = false;
+            if (emergency) {                                                    // emergencies only / +new
+                if (g_alertMode >= 1) { audio_play(AUDIO_ALERT); wake = true; }
+            } else if (g_alertMode >= 2) {
+                wake = true;
+                if (millis() - lastNew > 3000) {
+                    audio_play(AUDIO_NEW);                                      // new contact (the BEEP is rate-limited,
+                    lastNew = millis();                                         //   the wake is not: it is idempotent)
+                }
+            }
+            if (wake) {
+                g_wakeRequest = true;                                           // light the screen (applied in loop())
+                Serial.printf("[wake] %s entered range: screen wake\n", hex.c_str());
             }
         }
     }
@@ -724,12 +731,12 @@ static void handleRoot() {
         "<label>Volume</label>"
         "<input type=range min=0 max=100 value='%d' oninput='v(this.value,0)' onchange='v(this.value,1)'>"
         "<label><input type=checkbox class=ck %s onchange='m(this.checked)'>Mute alerts</label>"
-        "<label>Alert on</label><select onchange='al(this.value)'>%s</select>"
-        "<label>Proximity alert (also wakes the screen)</label><select onchange='px(this.value)'>%s</select>"
+        "<label>Alert on (also wakes the screen)</label><select onchange='al(this.value)'>%s</select>"
+        "<label>Proximity alert</label><select onchange='px(this.value)'>%s</select>"
         "<label><input type=checkbox class=ck id=sch %s onchange='sc()'>Only alert between these times</label>"
         "<div class=tr><div><label>Start</label><input type=time id=t1 value='%s' onchange='sc()'></div>"
         "<div><label>Stop</label><input type=time id=t2 value='%s' onchange='sc()'></div></div>"
-        "<div class=hn>Applies to alert sounds and the proximity screen wake. Local time (see Time zone above); can cross midnight, e.g. 22:00 to 06:00. %s</div>"
+        "<div class=hn>Applies to alert sounds and the screen wake. Local time (see Time zone above); can cross midnight, e.g. 22:00 to 06:00. %s</div>"
         "<button type=button class=sec onclick='t()'>Test ping</button></div>"
         "<div class=card><div class=t>Network</div>"
         "<p style='color:#9affc8;font-size:13px;margin:0 0 4px'>Forget the saved WiFi and reopen the setup portal.</p>"
@@ -1463,7 +1470,7 @@ void loop() {
             xSemaphoreGive(g_ac_mutex);
             radar::update(g_snap, g_settings); // rebuild the glyph/trail layer
             ui_on_data_updated();              // refresh card/list/stats
-            checkAudioEvents();                // ping new-in-range / emergency / military; proximity wake
+            checkAudioEvents();                // ping new-in-range / emergency / military; wake the screen for them
         }
     }
     if (g_weatherDirty) {
@@ -1571,8 +1578,8 @@ void loop() {
         g_asleep = faceDown.asleep();   // applyBrightness() below: dark (0) also makes a touch only wake it
     }
 
-    // A new plane crossing the proximity radius (checkAudioEvents) wakes the screen as if it
-    // were touched: the idle timer restarts from now, the clock / dim ends on this pass, and
+    // A new plane entering the scope (checkAudioEvents) wakes the screen as if it were
+    // touched: the idle timer restarts from now, the clock / dim ends on this pass, and
     // the countdown to dim again begins. Not while face-down: that screen is dark on purpose,
     // and a "touch" would also end the face-down sleep (touchedSinceLastCheck reads the same
     // inactivity timer).
